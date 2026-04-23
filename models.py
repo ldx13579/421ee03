@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Date, Time, DateTime, ForeignKey, Enum
+from sqlalchemy import Column, Integer, String, Date, Time, DateTime, ForeignKey, Enum, UniqueConstraint
 from sqlalchemy.orm import relationship, declarative_base
 from datetime import datetime
 import enum
@@ -45,6 +45,10 @@ class AttendanceRecord(Base):
     remark = Column(String(255), nullable=True)
     created_at = Column(DateTime, default=datetime.now)
     updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
+    
+    __table_args__ = (
+        UniqueConstraint('employee_id', 'date', name='uix_employee_date'),
+    )
     
     employee = relationship("Employee", back_populates="attendance_records")
     

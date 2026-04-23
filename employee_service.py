@@ -61,24 +61,38 @@ def delete_employee(session, employee_id):
     if not employee:
         raise ValueError(f"员工 {employee_id} 不存在")
     
+    employee_name = employee.name
+    
     try:
         attendance_count = session.query(AttendanceRecord).filter(
             AttendanceRecord.employee_id == employee_id
         ).count()
         
         session.delete(employee)
+        session.flush()
+        
+        after_delete_count = session.query(AttendanceRecord).filter(
+            AttendanceRecord.employee_id == employee_id
+        ).count()
+        
+        if after_delete_count != 0:
+            raise Exception(f"考勤记录未完全清理，剩余 {after_delete_count} 条")
+        
         session.commit()
         
         return {
             "success": True,
             "employee_id": employee_id,
-            "employee_name": employee.name,
+            "employee_name": employee_name,
             "deleted_attendance_records": attendance_count
         }
         
     except SQLAlchemyError as e:
         session.rollback()
-        raise Exception(f"删除员工失败: {str(e)}")
+        raise Exception(f"删除员工失败，事务已回滚: {str(e)}")
+    except Exception as e:
+        session.rollback()
+        raise
 
 def get_all_employees(session, department=None):
     query = session.query(Employee)

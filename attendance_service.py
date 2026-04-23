@@ -1,4 +1,5 @@
 from datetime import time, datetime, timedelta
+from sqlalchemy.exc import IntegrityError
 from models import AttendanceRecord, Employee, AttendanceStatus
 from validators import validate_clock_times, parse_time, validate_date
 from config import WORK_TIME_CONFIG
@@ -76,11 +77,14 @@ def create_attendance_record(session, employee_id, date, clock_in=None, clock_ou
         remark=remark
     )
     
-    session.add(record)
-    session.commit()
-    session.refresh(record)
-    
-    return record
+    try:
+        session.add(record)
+        session.commit()
+        session.refresh(record)
+        return record
+    except IntegrityError:
+        session.rollback()
+        raise ValueError(f"员工 {employee_id} 在 {date_obj} 已有考勤记录（并发冲突）")
 
 def update_attendance_record(session, record_id, clock_in=None, clock_out=None, remark=None):
     record = session.query(AttendanceRecord).filter(AttendanceRecord.id == record_id).first()
