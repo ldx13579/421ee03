@@ -157,11 +157,15 @@ def approve_leave_request(session, leave_request_id, approver_id, approval_remar
     
     try:
         if leave_request.leave_type in [LeaveType.ANNUAL_LEAVE, LeaveType.COMPENSATORY_LEAVE]:
-            current_year = date.today().year
+            if leave_request.created_at:
+                leave_year = leave_request.created_at.year
+            else:
+                leave_year = date.today().year
+            
             balance = session.query(LeaveBalance).filter(
                 LeaveBalance.employee_id == leave_request.employee_id,
                 LeaveBalance.leave_type == leave_request.leave_type,
-                LeaveBalance.year == current_year
+                LeaveBalance.year == leave_year
             ).first()
             
             if balance:
@@ -173,6 +177,12 @@ def approve_leave_request(session, leave_request_id, approver_id, approval_remar
                 
                 balance.used_days += leave_request.total_days
                 balance.remaining_days -= leave_request.total_days
+            else:
+                raise ValueError(
+                    f"{leave_year}年{leave_request.leave_type.value}余额未初始化"
+                )
+            
+            leave_request.leave_year = leave_year
         
         leave_request.status = LeaveStatus.APPROVED
         leave_request.approver_id = approver_id
@@ -238,16 +248,26 @@ def cancel_leave_request(session, leave_request_id, employee_id):
     try:
         if leave_request.status == LeaveStatus.APPROVED:
             if leave_request.leave_type in [LeaveType.ANNUAL_LEAVE, LeaveType.COMPENSATORY_LEAVE]:
-                current_year = leave_request.start_date.year
+                if leave_request.leave_year:
+                    restore_year = leave_request.leave_year
+                elif leave_request.created_at:
+                    restore_year = leave_request.created_at.year
+                else:
+                    restore_year = date.today().year
+                
                 balance = session.query(LeaveBalance).filter(
                     LeaveBalance.employee_id == leave_request.employee_id,
                     LeaveBalance.leave_type == leave_request.leave_type,
-                    LeaveBalance.year == current_year
+                    LeaveBalance.year == restore_year
                 ).first()
                 
                 if balance:
                     balance.used_days -= leave_request.total_days
                     balance.remaining_days += leave_request.total_days
+                else:
+                    raise ValueError(
+                        f"{restore_year}年{leave_request.leave_type.value}余额记录不存在，无法恢复"
+                    )
             
             _delete_leave_attendance_records(session, leave_request)
         

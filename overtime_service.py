@@ -5,7 +5,7 @@ from models import (
     Employee, OvertimeRequest, OvertimeSettlement, LeaveBalance,
     OvertimeType, OvertimeStatus, SettlementType, LeaveType
 )
-from config import OVERTIME_CONFIG
+from config import OVERTIME_CONFIG, is_legal_holiday
 from validators import validate_date
 
 def calculate_overtime_hours(start_time, end_time):
@@ -33,6 +33,10 @@ def determine_overtime_type(overtime_date):
         is_valid, overtime_date = validate_date(overtime_date)
         if not is_valid:
             raise ValueError(overtime_date)
+    
+    is_holiday, holiday_name = is_legal_holiday(overtime_date)
+    if is_holiday:
+        return OvertimeType.HOLIDAY
     
     weekday = overtime_date.weekday()
     

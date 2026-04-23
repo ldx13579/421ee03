@@ -152,6 +152,7 @@ class LeaveRequest(Base):
     approval_remark = Column(Text, nullable=True)
     approved_at = Column(DateTime, nullable=True)
     submitted_at = Column(DateTime, nullable=True)
+    leave_year = Column(Integer, nullable=True)
     created_at = Column(DateTime, default=datetime.now)
     updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
     
