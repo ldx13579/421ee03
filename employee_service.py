@@ -1,5 +1,5 @@
 from sqlalchemy.exc import SQLAlchemyError
-from models import Employee, AttendanceRecord
+from models import Employee, AttendanceRecord, ApprovalRole
 from datetime import datetime
 
 def create_employee(
@@ -12,7 +12,10 @@ def create_employee(
     phone=None,
     wechat_userid=None,
     annual_leave_balance=None,
-    compensatory_leave_balance=None
+    compensatory_leave_balance=None,
+    supervisor_id=None,
+    approval_role=None,
+    is_hr=False
 ):
     if not name or not employee_no:
         raise ValueError("员工姓名和工号不能为空")
@@ -24,6 +27,12 @@ def create_employee(
     from config import LEAVE_CONFIG
     default_annual = LEAVE_CONFIG.get("default_annual_leave_days", 10)
     
+    if approval_role and isinstance(approval_role, str):
+        try:
+            approval_role = ApprovalRole[approval_role.upper()]
+        except KeyError:
+            raise ValueError(f"无效的审批角色: {approval_role}")
+    
     employee = Employee(
         name=name,
         employee_no=employee_no,
@@ -33,7 +42,10 @@ def create_employee(
         phone=phone,
         wechat_userid=wechat_userid,
         annual_leave_balance=annual_leave_balance if annual_leave_balance is not None else default_annual,
-        compensatory_leave_balance=compensatory_leave_balance if compensatory_leave_balance is not None else 0
+        compensatory_leave_balance=compensatory_leave_balance if compensatory_leave_balance is not None else 0,
+        supervisor_id=supervisor_id,
+        approval_role=approval_role,
+        is_hr=is_hr
     )
     
     session.add(employee)
@@ -58,7 +70,10 @@ def update_employee(
     phone=None,
     wechat_userid=None,
     annual_leave_balance=None,
-    compensatory_leave_balance=None
+    compensatory_leave_balance=None,
+    supervisor_id=None,
+    approval_role=None,
+    is_hr=None
 ):
     employee = session.query(Employee).filter(Employee.id == employee_id).first()
     
@@ -81,6 +96,14 @@ def update_employee(
         employee.annual_leave_balance = annual_leave_balance
     if compensatory_leave_balance is not None:
         employee.compensatory_leave_balance = compensatory_leave_balance
+    if supervisor_id is not None:
+        employee.supervisor_id = supervisor_id
+    if approval_role is not None:
+        if isinstance(approval_role, str):
+            approval_role = ApprovalRole[approval_role.upper()]
+        employee.approval_role = approval_role
+    if is_hr is not None:
+        employee.is_hr = is_hr
     
     employee.updated_at = datetime.now()
     

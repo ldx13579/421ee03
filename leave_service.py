@@ -76,7 +76,8 @@ def create_leave_request(
     reason,
     start_time=None,
     end_time=None,
-    attachment_path=None
+    attachment_path=None,
+    approver_id=None
 ):
     employee = session.query(Employee).filter(Employee.id == employee_id).first()
     if not employee:
@@ -131,7 +132,8 @@ def create_leave_request(
         total_days=total_days,
         reason=reason.strip(),
         status=LeaveStatus.PENDING,
-        attachment_path=attachment_path
+        attachment_path=attachment_path,
+        approver_id=approver_id
     )
     
     try:

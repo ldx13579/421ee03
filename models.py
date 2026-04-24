@@ -51,6 +51,12 @@ class NotificationChannel(enum.Enum):
     EMAIL = "邮件"
     SMS = "短信"
 
+class ApprovalRole(enum.Enum):
+    DIRECT_SUPERVISOR = "直属主管"
+    DEPARTMENT_MANAGER = "部门经理"
+    HR_DIRECTOR = "人力资源总监"
+    ADMIN = "管理员"
+
 class Employee(Base):
     __tablename__ = 'employees'
     
@@ -64,6 +70,9 @@ class Employee(Base):
     wechat_userid = Column(String(100), nullable=True)
     annual_leave_balance = Column(Integer, default=0)
     compensatory_leave_balance = Column(Numeric(10, 2), default=0)
+    supervisor_id = Column(Integer, ForeignKey('employees.id'), nullable=True)
+    approval_role = Column(Enum(ApprovalRole), nullable=True)
+    is_hr = Column(Boolean, default=False)
     created_at = Column(DateTime, default=datetime.now)
     updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
     
@@ -103,6 +112,16 @@ class Employee(Base):
         "OvertimeRequest",
         foreign_keys="OvertimeRequest.approver_id",
         overlaps="approver"
+    )
+    approval_records = relationship(
+        "ApprovalRecord",
+        back_populates="approver",
+        cascade="all, delete-orphan"
+    )
+    subordinates = relationship(
+        "Employee",
+        backref="supervisor",
+        remote_side=[id]
     )
     
     def __repr__(self):
@@ -225,3 +244,47 @@ class Notification(Base):
     
     def __repr__(self):
         return f"<Notification(id={self.id}, type={self.notification_type}, channel={self.channel})>"
+
+
+class ApprovalType(enum.Enum):
+    LEAVE = "请假审批"
+    OVERTIME = "加班审批"
+
+class ApprovalResult(enum.Enum):
+    APPROVED = "已批准"
+    REJECTED = "已拒绝"
+
+class ApprovalRecord(Base):
+    __tablename__ = 'approval_records'
+    
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    approval_type = Column(Enum(ApprovalType), nullable=False)
+    request_id = Column(Integer, nullable=False, index=True)
+    approver_id = Column(Integer, ForeignKey('employees.id'), nullable=False, index=True)
+    approval_level = Column(Integer, default=1)
+    approval_result = Column(Enum(ApprovalResult), nullable=False)
+    comment = Column(Text, nullable=True)
+    approval_time = Column(DateTime, default=datetime.now)
+    created_at = Column(DateTime, default=datetime.now)
+    
+    approver = relationship("Employee", back_populates="approval_records")
+    
+    def __repr__(self):
+        return f"<ApprovalRecord(id={self.id}, type={self.approval_type}, result={self.approval_result})>"
+
+
+class DepartmentSupervisor(Base):
+    __tablename__ = 'department_supervisors'
+    
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    department = Column(String(100), nullable=False, unique=True)
+    supervisor_id = Column(Integer, ForeignKey('employees.id'), nullable=False)
+    role_type = Column(Enum(ApprovalRole), nullable=False)
+    is_active = Column(Boolean, default=True)
+    created_at = Column(DateTime, default=datetime.now)
+    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
+    
+    supervisor = relationship("Employee", foreign_keys=[supervisor_id])
+    
+    def __repr__(self):
+        return f"<DepartmentSupervisor(department={self.department}, role={self.role_type.value})>"

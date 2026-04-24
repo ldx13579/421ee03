@@ -20,7 +20,19 @@ LEAVE_CONFIG = {
         "1-3": "direct_supervisor",
         "4-7": "department_manager",
         "8+": "hr_director"
-    }
+    },
+    "auto_approve": False,
+    "notify_approver_on_submit": True,
+}
+
+HR_CONFIG = {
+    "hr_department": "人力资源部",
+    "default_hr_employee_no": "HR001",
+    "auto_detect_abnormal": True,
+    "abnormal_check_time": "10:00",
+    "notify_hr_on_abnormal": True,
+    "notify_supervisor_on_abnormal": True,
+    "notify_employee_on_abnormal": True,
 }
 
 OVERTIME_CONFIG = {

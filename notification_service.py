@@ -1,4 +1,4 @@
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, time as dt_time
 from decimal import Decimal
 import smtplib
 from email.mime.text import MIMEText
@@ -7,8 +7,12 @@ from email.header import Header
 
 import requests
 
-from models import Notification, Employee, AttendanceRecord, AttendanceStatus, NotificationType, NotificationChannel
-from config import NOTIFICATION_CONFIG
+from models import (
+    Notification, Employee, AttendanceRecord, 
+    AttendanceStatus, NotificationType, NotificationChannel,
+    DepartmentSupervisor, ApprovalRole
+)
+from config import NOTIFICATION_CONFIG, HR_CONFIG
 
 
 class WeChatNotification:
@@ -173,13 +177,129 @@ def send_notification(session, notification):
         return False, str(e)
 
 
+def get_supervisor_for_employee(session, employee):
+    if employee.supervisor_id:
+        supervisor = session.query(Employee).filter(
+            Employee.id == employee.supervisor_id
+        ).first()
+        if supervisor:
+            return supervisor
+    
+    if employee.department:
+        dept_supervisor = session.query(DepartmentSupervisor).filter(
+            DepartmentSupervisor.department == employee.department,
+            DepartmentSupervisor.role_type == ApprovalRole.DIRECT_SUPERVISOR,
+            DepartmentSupervisor.is_active == True
+        ).first()
+        
+        if dept_supervisor:
+            return dept_supervisor.supervisor
+        
+        dept_manager = session.query(DepartmentSupervisor).filter(
+            DepartmentSupervisor.department == employee.department,
+            DepartmentSupervisor.role_type == ApprovalRole.DEPARTMENT_MANAGER,
+            DepartmentSupervisor.is_active == True
+        ).first()
+        
+        if dept_manager:
+            return dept_manager.supervisor
+    
+    all_supervisors = session.query(Employee).filter(
+        Employee.approval_role == ApprovalRole.DIRECT_SUPERVISOR
+    ).all()
+    
+    if all_supervisors:
+        for sup in all_supervisors:
+            if sup.department == employee.department:
+                return sup
+        return all_supervisors[0]
+    
+    return None
+
+
+def get_hr_employees(session):
+    hr_dept = HR_CONFIG.get("hr_department", "人力资源部")
+    
+    hr_employees = session.query(Employee).filter(
+        Employee.is_hr == True
+    ).all()
+    
+    if hr_employees:
+        return hr_employees
+    
+    hr_employees = session.query(Employee).filter(
+        Employee.department == hr_dept
+    ).all()
+    
+    if hr_employees:
+        return hr_employees
+    
+    hr_director = session.query(DepartmentSupervisor).filter(
+        DepartmentSupervisor.role_type == ApprovalRole.HR_DIRECTOR,
+        DepartmentSupervisor.is_active == True
+    ).first()
+    
+    if hr_director and hr_director.supervisor:
+        return [hr_director.supervisor]
+    
+    return []
+
+
+def send_abnormal_notification(session, recipient_employee, title, content, target_type="员工"):
+    notifications = []
+    channels_config = NOTIFICATION_CONFIG.get("channels", {})
+    
+    if channels_config.get("WECHAT", {}).get("enabled", False) and recipient_employee.wechat_userid:
+        notification = create_notification(
+            session,
+            notification_type=NotificationType.ATTENDANCE_ABNORMAL,
+            channel=NotificationChannel.WECHAT,
+            title=title,
+            content=content,
+            recipient=recipient_employee.wechat_userid,
+            employee_id=recipient_employee.id
+        )
+        notifications.append(notification)
+        
+        success, msg = send_notification(session, notification)
+        if success:
+            print(f"  ✓ 企业微信通知已发送至{target_type}: {recipient_employee.name}")
+        else:
+            print(f"  ✗ 企业微信通知发送失败({target_type}): {msg}")
+    
+    if channels_config.get("EMAIL", {}).get("enabled", False) and recipient_employee.email:
+        notification = create_notification(
+            session,
+            notification_type=NotificationType.ATTENDANCE_ABNORMAL,
+            channel=NotificationChannel.EMAIL,
+            title=title,
+            content=content,
+            recipient=recipient_employee.email,
+            employee_id=recipient_employee.id
+        )
+        notifications.append(notification)
+        
+        success, msg = send_notification(session, notification)
+        if success:
+            print(f"  ✓ 邮件通知已发送至{target_type}: {recipient_employee.name}")
+        else:
+            print(f"  ✗ 邮件通知发送失败({target_type}): {msg}")
+    
+    return notifications
+
+
 def check_attendance_abnormal(session, check_date=None):
     if check_date is None:
         check_date = date.today()
     
     config = NOTIFICATION_CONFIG.get("attendance_abnormal_notify", {})
     if not config.get("enabled", False):
+        print("  考勤异常通知功能未启用")
         return []
+    
+    notify_employee = HR_CONFIG.get("notify_employee_on_abnormal", True)
+    notify_supervisor = HR_CONFIG.get("notify_supervisor_on_abnormal", True)
+    notify_hr = HR_CONFIG.get("notify_hr_on_abnormal", True)
     
     notify_types = config.get("notify_types", ["LATE", "EARLY_LEAVE", "ABSENT"])
     status_map = {
@@ -195,7 +315,15 @@ def check_attendance_abnormal(session, check_date=None):
         AttendanceRecord.status.in_(target_statuses)
     ).all()
     
-    notifications = []
+    all_notifications = []
+    
+    print(f"\n  开始检测 {check_date} 的考勤异常...")
+    print(f"  发现 {len(abnormal_records)} 条异常记录")
+    
+    hr_employees = []
+    if notify_hr:
+        hr_employees = get_hr_employees(session)
+        print(f"  HR人员数量: {len(hr_employees)}")
     
     for record in abnormal_records:
         employee = session.query(Employee).filter(Employee.id == record.employee_id).first()
@@ -208,9 +336,11 @@ def check_attendance_abnormal(session, check_date=None):
             AttendanceStatus.ABSENT: "缺勤"
         }.get(record.status, "异常")
         
-        title = f"考勤异常通知 - {employee.name}"
+        employee_title = f"考勤异常通知 - {employee.name}"
+        supervisor_title = f"下属考勤异常通知 - {employee.name}"
+        hr_title = f"考勤异常通知 - {employee.department or '未知部门'} - {employee.name}"
         
-        content = f"""【考勤异常提醒】
+        employee_content = f"""【考勤异常提醒】
 
 员工: {employee.name} ({employee.employee_no})
 部门: {employee.department or '未分配'}
@@ -219,51 +349,95 @@ def check_attendance_abnormal(session, check_date=None):
 """
         
         if record.clock_in:
-            content += f"上班打卡: {record.clock_in}\n"
+            employee_content += f"上班打卡: {record.clock_in}\n"
         if record.clock_out:
-            content += f"下班打卡: {record.clock_out}\n"
+            employee_content += f"下班打卡: {record.clock_out}\n"
         
-        content += f"\n请及时关注并处理。"
+        employee_content += f"\n如有疑问，请及时联系主管或HR。"
         
-        channels_config = NOTIFICATION_CONFIG.get("channels", {})
+        supervisor_content = f"""【下属考勤异常提醒】
+
+员工: {employee.name} ({employee.employee_no})
+部门: {employee.department or '未分配'}
+日期: {check_date}
+状态: {status_desc}
+"""
         
-        if channels_config.get("WECHAT", {}).get("enabled", False) and employee.wechat_userid:
-            notification = create_notification(
-                session,
-                notification_type=NotificationType.ATTENDANCE_ABNORMAL,
-                channel=NotificationChannel.WECHAT,
-                title=title,
-                content=content,
-                recipient=employee.wechat_userid,
-                employee_id=employee.id
+        if record.clock_in:
+            supervisor_content += f"上班打卡: {record.clock_in}\n"
+        if record.clock_out:
+            supervisor_content += f"下班打卡: {record.clock_out}\n"
+        
+        supervisor_content += f"\n请及时关注并了解情况。"
+        
+        hr_content = f"""【考勤异常通知】
+
+员工: {employee.name} ({employee.employee_no})
+部门: {employee.department or '未分配'}
+日期: {check_date}
+状态: {status_desc}
+"""
+        
+        if record.clock_in:
+            hr_content += f"上班打卡: {record.clock_in}\n"
+        if record.clock_out:
+            hr_content += f"下班打卡: {record.clock_out}\n"
+        
+        hr_content += f"\n请跟进处理。"
+        
+        print(f"\n  处理异常记录: {employee.name} - {status_desc}")
+        
+        if notify_employee:
+            print(f"  通知员工本人...")
+            notifications = send_abnormal_notification(
+                session, employee, employee_title, employee_content, "员工"
             )
-            notifications.append(notification)
-            
-            success, msg = send_notification(session, notification)
-            if success:
-                print(f"  ✓ 企业微信通知已发送: {employee.name}")
-            else:
-                print(f"  ✗ 企业微信通知发送失败: {msg}")
+            all_notifications.extend(notifications)
         
-        if channels_config.get("EMAIL", {}).get("enabled", False) and employee.email:
-            notification = create_notification(
-                session,
-                notification_type=NotificationType.ATTENDANCE_ABNORMAL,
-                channel=NotificationChannel.EMAIL,
-                title=title,
-                content=content,
-                recipient=employee.email,
-                employee_id=employee.id
-            )
-            notifications.append(notification)
-            
-            success, msg = send_notification(session, notification)
-            if success:
-                print(f"  ✓ 邮件通知已发送: {employee.name}")
+        if notify_supervisor:
+            print(f"  通知主管...")
+            supervisor = get_supervisor_for_employee(session, employee)
+            if supervisor:
+                notifications = send_abnormal_notification(
+                    session, supervisor, supervisor_title, supervisor_content, "主管"
+                )
+                all_notifications.extend(notifications)
             else:
-                print(f"  ✗ 邮件通知发送失败: {msg}")
+                print(f"  ⚠ 未找到主管: {employee.name}")
+        
+        if notify_hr and hr_employees:
+            print(f"  通知HR...")
+            for hr_emp in hr_employees:
+                notifications = send_abnormal_notification(
+                    session, hr_emp, hr_title, hr_content, "HR"
+                )
+                all_notifications.extend(notifications)
     
-    return notifications
+    print(f"\n  异常检测完成，共发送 {len(all_notifications)} 条通知")
+    return all_notifications
+
+
+def run_attendance_check(session, force_run=False):
+    auto_detect = HR_CONFIG.get("auto_detect_abnormal", True)
+    if not auto_detect and not force_run:
+        print("自动检测未启用，跳过考勤检查")
+        return []
+    
+    check_time_str = HR_CONFIG.get("abnormal_check_time", "10:00")
+    try:
+        check_hour, check_minute = map(int, check_time_str.split(":"))
+    except:
+        check_hour, check_minute = 10, 0
+    
+    now = datetime.now()
+    current_time = dt_time(now.hour, now.minute)
+    check_time = dt_time(check_hour, check_minute)
+    
+    if not force_run and current_time < check_time:
+        print(f"当前时间 {current_time} 早于检查时间 {check_time}，跳过")
+        return []
+    
+    return check_attendance_abnormal(session, check_date=date.today())
 
 
 def get_pending_notifications(session):

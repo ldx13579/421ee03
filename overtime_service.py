@@ -75,17 +75,21 @@ def create_overtime_request(
     session,
     employee_id,
     overtime_type,
-    date,
-    start_time,
-    end_time,
-    reason,
-    settlement_type=None
+    overtime_date=None,
+    start_time=None,
+    end_time=None,
+    reason=None,
+    settlement_type=None,
+    approver_id=None,
+    date=None
 ):
+    actual_date = overtime_date if overtime_date is not None else date
+    
     employee = session.query(Employee).filter(Employee.id == employee_id).first()
     if not employee:
         raise ValueError(f"员工 {employee_id} 不存在")
     
-    is_valid, date_obj = validate_date(date, allow_future=True)
+    is_valid, date_obj = validate_date(actual_date, allow_future=True)
     if not is_valid:
         raise ValueError(f"日期无效: {date_obj}")
     
@@ -125,7 +129,8 @@ def create_overtime_request(
         total_hours=total_hours,
         reason=reason.strip(),
         status=OvertimeStatus.PENDING,
-        settlement_type=settlement_type
+        settlement_type=settlement_type,
+        approver_id=approver_id
     )
     
     try:
