@@ -2,7 +2,18 @@ from sqlalchemy.exc import SQLAlchemyError
 from models import Employee, AttendanceRecord
 from datetime import datetime
 
-def create_employee(session, name, employee_no, department=None, position=None, email=None, phone=None):
+def create_employee(
+    session, 
+    name, 
+    employee_no, 
+    department=None, 
+    position=None, 
+    email=None, 
+    phone=None,
+    wechat_userid=None,
+    annual_leave_balance=None,
+    compensatory_leave_balance=None
+):
     if not name or not employee_no:
         raise ValueError("员工姓名和工号不能为空")
     
@@ -10,13 +21,19 @@ def create_employee(session, name, employee_no, department=None, position=None, 
     if existing:
         raise ValueError(f"工号 {employee_no} 已存在")
     
+    from config import LEAVE_CONFIG
+    default_annual = LEAVE_CONFIG.get("default_annual_leave_days", 10)
+    
     employee = Employee(
         name=name,
         employee_no=employee_no,
         department=department,
         position=position,
         email=email,
-        phone=phone
+        phone=phone,
+        wechat_userid=wechat_userid,
+        annual_leave_balance=annual_leave_balance if annual_leave_balance is not None else default_annual,
+        compensatory_leave_balance=compensatory_leave_balance if compensatory_leave_balance is not None else 0
     )
     
     session.add(employee)
@@ -31,7 +48,18 @@ def get_employee(session, employee_id):
 def get_employee_by_no(session, employee_no):
     return session.query(Employee).filter(Employee.employee_no == employee_no).first()
 
-def update_employee(session, employee_id, name=None, department=None, position=None, email=None, phone=None):
+def update_employee(
+    session, 
+    employee_id, 
+    name=None, 
+    department=None, 
+    position=None, 
+    email=None, 
+    phone=None,
+    wechat_userid=None,
+    annual_leave_balance=None,
+    compensatory_leave_balance=None
+):
     employee = session.query(Employee).filter(Employee.id == employee_id).first()
     
     if not employee:
@@ -47,6 +75,12 @@ def update_employee(session, employee_id, name=None, department=None, position=N
         employee.email = email
     if phone is not None:
         employee.phone = phone
+    if wechat_userid is not None:
+        employee.wechat_userid = wechat_userid
+    if annual_leave_balance is not None:
+        employee.annual_leave_balance = annual_leave_balance
+    if compensatory_leave_balance is not None:
+        employee.compensatory_leave_balance = compensatory_leave_balance
     
     employee.updated_at = datetime.now()
     

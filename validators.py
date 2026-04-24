@@ -76,7 +76,7 @@ def validate_clock_times(clock_in_time, clock_out_time):
     
     return True, "时间校验通过"
 
-def validate_date(date_val):
+def validate_date(date_val, allow_future=False):
     if date_val is None:
         return False, "日期不能为空"
     
@@ -86,7 +86,26 @@ def validate_date(date_val):
         except ValueError:
             return False, "日期格式错误，应为YYYY-MM-DD格式，如: 2024-04-21"
     
-    if date_val > datetime.now().date():
+    if not allow_future and date_val > datetime.now().date():
         return False, "日期不能是未来时间"
+    
+    return True, date_val
+
+
+def validate_future_date(date_val, max_days_ahead=365):
+    if date_val is None:
+        return False, "日期不能为空"
+    
+    if isinstance(date_val, str):
+        try:
+            date_val = datetime.strptime(date_val, '%Y-%m-%d').date()
+        except ValueError:
+            return False, "日期格式错误，应为YYYY-MM-DD格式，如: 2024-04-21"
+    
+    today = datetime.now().date()
+    max_date = today + timedelta(days=max_days_ahead)
+    
+    if date_val > max_date:
+        return False, f"日期不能超过 {max_days_ahead} 天后"
     
     return True, date_val
